@@ -3,6 +3,7 @@ var express = require('express');
 var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
+var ytdl = require('ytdl-core');
 
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
@@ -38,5 +39,28 @@ app.use(function(err, req, res, next) {
   res.status(err.status || 500);
   res.render('error');
 });
+
+app.get('/download', async (req, res) => {
+  const { url } = req.query;
+
+  if (!url || !ytdl.validateURL(url)) {
+    return res.status(400).send('Invalid YouTube URL');
+  }
+
+  try {
+    const info = await ytdl.getInfo(url);
+    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+
+    res.setHeader('Content-Type', audioFormat.container);
+    res.setHeader('Content-Disposition', 'attachment; filename="audio.mp3"');
+
+    ytdl(url, { format: audioFormat })
+        .pipe(res);
+  } catch (err) {
+    console.error('Error while downloading:', err);
+    res.status(500).send('Failed to download video');
+  }
+});
+
 
 module.exports = app;

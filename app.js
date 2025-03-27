@@ -4,6 +4,7 @@ var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 var ytdl = require('ytdl-core');
+const { spawn } = require('child_process');
 
 var indexRouter = require('./routes/index');
 var usersRouter = require('./routes/users');
@@ -40,7 +41,7 @@ app.use(function(err, req, res, next) {
   res.render('error');
 });
 
-app.get('/download', async (req, res) => {
+app.use('/download', async (req, res) => {
   const { url } = req.query;
 
   if (!url || !ytdl.validateURL(url)) {
@@ -48,17 +49,33 @@ app.get('/download', async (req, res) => {
   }
 
   try {
-    const info = await ytdl.getInfo(url);
-    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', 'inline; filename="stream.mp3"');
 
-    res.setHeader('Content-Type', audioFormat.container);
-    res.setHeader('Content-Disposition', 'attachment; filename="audio.mp3"');
+    // Pobieramy strumień audio
+    const audioStream = ytdl(url, { quality: 'highestaudio' });
 
-    ytdl(url, { format: audioFormat })
-        .pipe(res);
+    // Uruchamiamy FFmpeg i konwertujemy do MP3
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', 'pipe:0',  // Wejście: strumień z ytdl
+      '-f', 'mp3',     // Format wyjściowy: MP3
+      '-b:a', '192k',  // Jakość audio (bitrate)
+      '-vn',           // Bez wideo
+      'pipe:1'         // Wyjście: przesyłamy do klienta
+    ]);
+
+    // Przekierowanie błędów FFmpeg do konsoli
+    ffmpeg.stderr.on('data', (data) => console.error(`FFmpeg error: ${data}`));
+
+    // Przekazujemy strumień z ytdl do FFmpeg
+    audioStream.pipe(ffmpeg.stdin);
+
+    // Przekazujemy strumień z FFmpeg do klienta
+    ffmpeg.stdout.pipe(res);
+
   } catch (err) {
-    console.error('Error while downloading:', err);
-    res.status(500).send('Failed to download video');
+    console.error('Error streaming:', err);
+    res.status(500).send('Failed to stream audio');
   }
 });
 
